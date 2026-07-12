@@ -39,7 +39,7 @@ services:
     restart: unless-stopped
 
   kafka:
-    image: confluentinc/cp-kafka:7.6.1
+    build: ./kafka
     hostname: kafka.example.com
     container_name: kafka
     depends_on:
@@ -51,11 +51,7 @@ services:
     volumes:
       - kafka-keytabs:/etc/kafka/secrets
       - kafka-data:/var/lib/kafka/data
-      - ./kafka/krb5.conf:/etc/krb5.conf:ro,Z
-      - ./kafka/kafka_server_jaas.conf:/etc/kafka/kafka_server_jaas.conf:ro,Z
     # Wait for the KDC to publish the broker's keytab before starting Kafka.
-    # This is inlined here (rather than a mounted script) so there's no
-    # bind-mounted file whose permissions/SELinux label can go stale.
     entrypoint: ["bash", "-c"]
     command:
       - |
@@ -97,7 +93,7 @@ services:
   #   kafka-topics --bootstrap-server kafka.example.com:9092 \
   #     --command-config /etc/kafka/client.properties --list
   test-client:
-    image: confluentinc/cp-kafka:7.6.1
+    build: ./test-client
     container_name: kafka-test-client
     depends_on:
       - kafka
@@ -105,7 +101,5 @@ services:
       - kerberos-net
     volumes:
       - kafka-keytabs:/etc/kafka/secrets
-      - ./kafka/krb5.conf:/etc/krb5.conf:ro,Z
-      - ./client/client.properties:/etc/kafka/client.properties:ro,Z
     entrypoint: ["sleep", "infinity"]
     restart: unless-stopped

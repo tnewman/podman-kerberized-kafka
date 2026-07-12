@@ -10,7 +10,8 @@ Compose.
 kerberized-kafka/
 ├── docker-compose.yml        # the whole stack
 ├── kdc/                      # KDC image: realm, kdc.conf, entrypoint
-├── kafka/                    # config files mounted into the Kafka broker
+├── kafka/                    # Kafka broker image: krb5.conf + JAAS baked in
+├── test-client/              # test-client image: krb5.conf + client.properties baked in
 └── client/                   # files for connecting from outside the stack
 ```
 
@@ -25,17 +26,20 @@ kerberized-kafka/
 1. `kdc` builds a small Debian image running `krb5kdc` + `kadmind`. On first
    boot it creates the `EXAMPLE.COM` realm and generates two keytabs into a
    shared volume: one for the Kafka broker, one for a test client.
-2. `kafka` (Confluent's `cp-kafka` image) starts, but its entrypoint is
+2. `kafka` builds on top of Confluent's `cp-kafka` image with `krb5.conf` and
+   the broker's JAAS config copied in at build time (they're static, so
+   there's no reason to bind-mount them — that also sidesteps SELinux
+   labeling headaches on rootless Podman entirely). Its entrypoint is
    overridden with an inline wait loop (in `docker-compose.yml`) that blocks
-   until the KDC has written `kafka.keytab`, then hands off to Kafka's normal
-   startup script — otherwise Kafka would start before its credentials
-   exist. It's inlined rather than a mounted script file so there's nothing
-   for file permissions or SELinux labeling to break. The broker runs KRaft
-   mode (broker+controller combined) with a single listener,
-   `SASL_PLAINTEXT`, authenticated via GSSAPI.
-3. `test-client` is a plain container with the client keytab and `krb5.conf`
-   pre-mounted, so you can `exec` into it and run Kafka CLI tools immediately
-   without installing anything on your host.
+   until the KDC has written `kafka.keytab` — which *does* have to be a
+   runtime volume, since it's generated dynamically — then hands off to
+   Kafka's normal startup script. The broker runs KRaft mode
+   (broker+controller combined) with a single listener, `SASL_PLAINTEXT`,
+   authenticated via GSSAPI.
+3. `test-client` similarly builds on `cp-kafka` with `krb5.conf` and
+   `client.properties` copied in at build time, plus the client keytab
+   mounted at runtime from the same shared volume. `exec` into it to run
+   Kafka CLI tools immediately without installing anything on your host.
 
 ## Running it
 
@@ -48,6 +52,10 @@ podman-compose logs -f kdc kafka   # watch it come up
 The KDC needs a few seconds to initialize before Kafka's keytab appears, so
 the broker will sit in "Waiting for Kerberos keytab..." briefly — that's
 expected.
+
+Since `krb5.conf` and the JAAS configs are now baked into the `kafka` and
+`test-client` images at build time, if you edit them you'll need to rebuild:
+`podman-compose up -d --build`.
 
 ## Quick smoke test (using the bundled test-client container)
 
@@ -145,12 +153,14 @@ podman-compose down -v
   self-heals this on the next start, but if you're still stuck, force a
   clean slate: `podman-compose down -v` (this wipes all volumes, including
   the realm database and keytabs) then `podman-compose up -d --build`.
-- **`Permission denied` running a bind-mounted script** — on SELinux-enabled
-  hosts (Fedora, RHEL, CentOS and friends), rootless Podman blocks container
-  access to bind-mounted host files unless they're relabeled, even for
-  read-only mounts. This compose file already appends `:Z` to the relevant
-  volume mounts to handle that. If you add your own bind mounts, do the
-  same, or run `chcon -Rt container_file_t <path>` on the host directory.
+- **SELinux / rootless Podman and bind mounts** — the static config files
+  (`krb5.conf`, JAAS config, `client.properties`) are copied into the images
+  at build time rather than bind-mounted, specifically to avoid SELinux
+  labeling issues on Fedora/RHEL-family rootless Podman hosts. If you add
+  your own bind mounts later, remember: read-only mounts still need
+  relabeling (`:Z` for a file used by one container, lowercase `:z` if the
+  same host file is mounted into more than one container — mixing this up
+  causes one container to silently lose read access to the file).
 - **`GSSException: No valid credentials provided`** — usually a clock skew
   (Kerberos tickets are time-sensitive) or the client's `krb5.conf`/keytab
   principal not matching exactly. Run `klist -kt` on the keytab to confirm
