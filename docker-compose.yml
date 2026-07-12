@@ -1,0 +1,103 @@
+version: "3.8"
+
+networks:
+  kerberos-net:
+    name: kerberos-net
+
+volumes:
+  kdc-data:
+  kafka-keytabs:
+  kafka-data:
+
+services:
+
+  kdc:
+    build: ./kdc
+    hostname: kdc.example.com
+    container_name: kdc
+    networks:
+      kerberos-net:
+        aliases:
+          - kdc.example.com
+    volumes:
+      - kdc-data:/var/lib/krb5kdc
+      - kafka-keytabs:/keytabs
+    # Rootless Podman can't bind host ports < 1024 without extra sysctl
+    # configuration, so we publish the KDC on unprivileged host ports.
+    # The container itself still listens on the standard 88/749 internally,
+    # and other containers on kerberos-net reach it that way unaffected by
+    # this remapping — only external/host clients need the new port numbers
+    # (see client/krb5.conf).
+    ports:
+      - "10088:88/udp"
+      - "10088:88/tcp"
+      - "10749:749/tcp"
+    environment:
+      KDC_MASTER_PASSWORD: masterpassword
+      KDC_ADMIN_PASSWORD: adminpassword
+      KDC_CLIENT_PASSWORD: clientpassword
+    restart: unless-stopped
+
+  kafka:
+    image: confluentinc/cp-kafka:7.6.1
+    hostname: kafka.example.com
+    container_name: kafka
+    depends_on:
+      - kdc
+    networks:
+      kerberos-net:
+        aliases:
+          - kafka.example.com
+    volumes:
+      - kafka-keytabs:/etc/kafka/secrets
+      - kafka-data:/var/lib/kafka/data
+      - ./kafka/krb5.conf:/etc/krb5.conf:ro
+      - ./kafka/kafka_server_jaas.conf:/etc/kafka/kafka_server_jaas.conf:ro
+      - ./kafka/wait-for-keytab.sh:/usr/local/bin/wait-for-keytab.sh:ro
+    entrypoint: ["bash", "/usr/local/bin/wait-for-keytab.sh"]
+    ports:
+      - "9092:9092"
+    environment:
+      KAFKA_NODE_ID: 1
+      CLUSTER_ID: "MkU3OEVBNTcwNTJENDM2Qk"
+      KAFKA_PROCESS_ROLES: "broker,controller"
+      KAFKA_CONTROLLER_QUORUM_VOTERS: "1@kafka.example.com:9093"
+      KAFKA_CONTROLLER_LISTENER_NAMES: "CONTROLLER"
+
+      KAFKA_LISTENERS: "SASL_PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093"
+      KAFKA_ADVERTISED_LISTENERS: "SASL_PLAINTEXT://kafka.example.com:9092"
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: "SASL_PLAINTEXT:SASL_PLAINTEXT,CONTROLLER:PLAINTEXT"
+      KAFKA_INTER_BROKER_LISTENER_NAME: "SASL_PLAINTEXT"
+
+      KAFKA_SASL_ENABLED_MECHANISMS: "GSSAPI"
+      KAFKA_SASL_MECHANISM_INTER_BROKER_PROTOCOL: "GSSAPI"
+      KAFKA_SASL_KERBEROS_SERVICE_NAME: "kafka"
+
+      KAFKA_OPTS: "-Djava.security.krb5.conf=/etc/krb5.conf -Djava.security.auth.login.config=/etc/kafka/kafka_server_jaas.conf"
+
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_LOG4J_ROOT_LOGLEVEL: "WARN"
+    restart: unless-stopped
+
+  # Optional: a ready-made container for testing producers/consumers without
+  # needing Kafka client tools installed on your host. It has the client
+  # keytab and krb5.conf already mounted.
+  #
+  #   podman-compose exec test-client bash
+  #   kafka-topics --bootstrap-server kafka.example.com:9092 \
+  #     --command-config /etc/kafka/client.properties --list
+  test-client:
+    image: confluentinc/cp-kafka:7.6.1
+    container_name: kafka-test-client
+    depends_on:
+      - kafka
+    networks:
+      - kerberos-net
+    volumes:
+      - kafka-keytabs:/etc/kafka/secrets
+      - ./kafka/krb5.conf:/etc/krb5.conf:ro
+      - ./client/client.properties:/etc/kafka/client.properties:ro
+    entrypoint: ["sleep", "infinity"]
+    restart: unless-stopped
