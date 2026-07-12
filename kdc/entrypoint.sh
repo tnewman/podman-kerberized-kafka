@@ -1,7 +1,7 @@
 #!/bin/bash
 set -euo pipefail
 
-REALM="EXAMPLE.COM"
+REALM="EXAMPLE.LOCALHOST"
 KDC_DB_DIR="/var/lib/krb5kdc"
 KEYTAB_DIR="/keytabs"
 MASTER_PW="${KDC_MASTER_PASSWORD:-masterpassword}"
@@ -32,9 +32,9 @@ if [ ! -f "${KDC_DB_DIR}/principal" ]; then
     kadmin.local -q "addprinc -pw ${ADMIN_PW} admin/admin@${REALM}"
 
     # Kafka broker service principal + keytab.
-    # Hostname MUST match the broker's advertised hostname (kafka.example.com).
-    kadmin.local -q "addprinc -randkey kafka/kafka.example.com@${REALM}"
-    kadmin.local -q "ktadd -norandkey -k ${KEYTAB_DIR}/kafka.keytab kafka/kafka.example.com@${REALM}"
+    # Hostname MUST match the broker's advertised hostname (kafka.example.localhost).
+    kadmin.local -q "addprinc -randkey kafka/kafka.example.localhost@${REALM}"
+    kadmin.local -q "ktadd -norandkey -k ${KEYTAB_DIR}/kafka.keytab kafka/kafka.example.localhost@${REALM}"
 
     # A sample client principal for testing producers/consumers, both as a
     # keytab (for non-interactive use) and a password (for interactive kinit).
@@ -43,7 +43,7 @@ if [ ! -f "${KDC_DB_DIR}/principal" ]; then
 
     chmod 644 "${KEYTAB_DIR}"/*.keytab
     echo "[kdc] Realm bootstrap complete."
-    echo "[kdc]   kafka principal: kafka/kafka.example.com@${REALM}"
+    echo "[kdc]   kafka principal: kafka/kafka.example.localhost@${REALM}"
     echo "[kdc]   client principal: client@${REALM} (password: ${CLIENT_PW})"
 else
     echo "[kdc] Existing database found, skipping bootstrap."

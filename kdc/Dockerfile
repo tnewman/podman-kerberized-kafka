@@ -4,9 +4,9 @@ ENV DEBIAN_FRONTEND=noninteractive
 
 # Pre-seed debconf so the krb5 packages install non-interactively.
 # We still fully control realm creation ourselves in entrypoint.sh.
-RUN echo "krb5-config krb5-config/default_realm string EXAMPLE.COM" | debconf-set-selections \
-    && echo "krb5-config krb5-config/kerberos_servers string kdc.example.com" | debconf-set-selections \
-    && echo "krb5-config krb5-config/admin_server string kdc.example.com" | debconf-set-selections \
+RUN echo "krb5-config krb5-config/default_realm string EXAMPLE.LOCALHOST" | debconf-set-selections \
+    && echo "krb5-config krb5-config/kerberos_servers string kdc.example.localhost" | debconf-set-selections \
+    && echo "krb5-config krb5-config/admin_server string kdc.example.localhost" | debconf-set-selections \
     && apt-get update \
     && apt-get install -y --no-install-recommends \
         krb5-kdc \

@@ -15,16 +15,22 @@ kerberized-kafka/
 └── client/                   # files for connecting from outside the stack
 ```
 
-**Realm:** `EXAMPLE.COM`
-**KDC hostname:** `kdc.example.com`
-**Kafka hostname:** `kafka.example.com`
-**Kafka service principal:** `kafka/kafka.example.com@EXAMPLE.COM`
-**Test client principal:** `client@EXAMPLE.COM` (password `clientpassword`, and a keytab)
+**Realm:** `EXAMPLE.LOCALHOST`
+**KDC hostname:** `kdc.example.localhost`
+**Kafka hostname:** `kafka.example.localhost`
+**Kafka service principal:** `kafka/kafka.example.localhost@EXAMPLE.LOCALHOST`
+**Test client principal:** `client@EXAMPLE.LOCALHOST` (password `clientpassword`, and a keytab)
+
+The domain is under `.localhost` on purpose: RFC 6761 reserves that entire
+TLD to always mean loopback, and systemd (`nss-myhostname`, `systemd-resolved`)
+implements that natively — so `kdc.example.localhost` and
+`kafka.example.localhost` resolve to `127.0.0.1` on any systemd-based host
+with zero configuration, no `/etc/hosts` edits required.
 
 ## How it works
 
 1. `kdc` builds a small Debian image running `krb5kdc` + `kadmind`. On first
-   boot it creates the `EXAMPLE.COM` realm and generates two keytabs into a
+   boot it creates the `EXAMPLE.LOCALHOST` realm and generates two keytabs into a
    shared volume: one for the Kafka broker, one for a test client.
 2. `kafka` builds on top of Confluent's `cp-kafka` image with `krb5.conf` and
    the broker's JAAS config copied in at build time (they're static, so
@@ -63,29 +69,34 @@ Since `krb5.conf` and the JAAS configs are now baked into the `kafka` and
 podman-compose exec test-client bash
 
 # Inside the container:
-kafka-topics --bootstrap-server kafka.example.com:9092 \
+kafka-topics --bootstrap-server kafka.example.localhost:9092 \
   --command-config /etc/kafka/client.properties \
   --create --topic demo --partitions 1 --replication-factor 1
 
-kafka-console-producer --bootstrap-server kafka.example.com:9092 \
+kafka-console-producer --bootstrap-server kafka.example.localhost:9092 \
   --producer.config /etc/kafka/client.properties \
   --topic demo
 # type a few lines, Ctrl-D to end
 
-kafka-console-consumer --bootstrap-server kafka.example.com:9092 \
+kafka-console-consumer --bootstrap-server kafka.example.localhost:9092 \
   --consumer.config /etc/kafka/client.properties \
   --topic demo --from-beginning
 ```
 
 ## Connecting from your host machine (or another app)
 
-1. **Resolve the hostnames.** The stack uses `kdc.example.com` and
-   `kafka.example.com` internally, and your client needs to resolve them too.
-   Since the KDC and Kafka ports are published to `localhost`, add to your
-   `/etc/hosts`:
+1. **Hostname resolution is automatic.** The stack uses `kdc.example.localhost`
+   and `kafka.example.localhost`, and the KDC/Kafka ports are published to
+   `localhost`. Because the realm's domain is under the reserved `.localhost`
+   TLD (RFC 6761), any systemd-based Linux host resolves these to `127.0.0.1`
+   out of the box — `nss-myhostname` and `systemd-resolved` both special-case
+   `.localhost`. No `/etc/hosts` edit needed.
+
+   If your host doesn't use systemd (macOS, some minimal Linux distros), add
+   this to `/etc/hosts` as a fallback:
 
    ```
-   127.0.0.1  kdc.example.com kafka.example.com
+   127.0.0.1  kdc.example.localhost kafka.example.localhost
    ```
 
 2. **Get the `krb5.conf`.** Use `client/krb5.conf` from this project — note
@@ -108,7 +119,7 @@ kafka-console-consumer --bootstrap-server kafka.example.com:9092 \
    in `client/client.properties`) or interactively:
 
    ```bash
-   kinit -kt client/client.keytab client@EXAMPLE.COM
+   kinit -kt client/client.keytab client@EXAMPLE.LOCALHOST
    klist   # confirm you have a ticket
    ```
 
@@ -125,8 +136,8 @@ kafka-console-consumer --bootstrap-server kafka.example.com:9092 \
 Exec into the KDC and use `kadmin.local`:
 
 ```bash
-podman-compose exec kdc kadmin.local -q "addprinc -pw somepassword alice@EXAMPLE.COM"
-podman-compose exec kdc kadmin.local -q "ktadd -norandkey -k /keytabs/alice.keytab alice@EXAMPLE.COM"
+podman-compose exec kdc kadmin.local -q "addprinc -pw somepassword alice@EXAMPLE.LOCALHOST"
+podman-compose exec kdc kadmin.local -q "ktadd -norandkey -k /keytabs/alice.keytab alice@EXAMPLE.LOCALHOST"
 ```
 
 Keytabs land in the `kafka-keytabs` volume, which is also mounted at
@@ -167,7 +178,7 @@ podman-compose down -v
   the principal name.
 - **Hostname mismatch errors** — Kerberos service principals are
   hostname-specific. If you change `KAFKA_ADVERTISED_LISTENERS`, the
-  principal created in `kdc/entrypoint.sh` (`kafka/kafka.example.com`) must
+  principal created in `kdc/entrypoint.sh` (`kafka/kafka.example.localhost`) must
   match the new hostname exactly.
 - **Running as non-root / rootless Podman** — rootless Podman can't publish
   host ports below 1024 without extra privileges, so this compose file

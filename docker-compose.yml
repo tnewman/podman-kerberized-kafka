@@ -13,12 +13,12 @@ services:
 
   kdc:
     build: ./kdc
-    hostname: kdc.example.com
+    hostname: kdc.example.localhost
     container_name: kdc
     networks:
       kerberos-net:
         aliases:
-          - kdc.example.com
+          - kdc.example.localhost
     volumes:
       - kdc-data:/var/lib/krb5kdc
       - kafka-keytabs:/keytabs
@@ -40,14 +40,14 @@ services:
 
   kafka:
     build: ./kafka
-    hostname: kafka.example.com
+    hostname: kafka.example.localhost
     container_name: kafka
     depends_on:
       - kdc
     networks:
       kerberos-net:
         aliases:
-          - kafka.example.com
+          - kafka.example.localhost
     volumes:
       - kafka-keytabs:/etc/kafka/secrets
       - kafka-data:/var/lib/kafka/data
@@ -65,11 +65,11 @@ services:
       KAFKA_NODE_ID: 1
       CLUSTER_ID: "MkU3OEVBNTcwNTJENDM2Qk"
       KAFKA_PROCESS_ROLES: "broker,controller"
-      KAFKA_CONTROLLER_QUORUM_VOTERS: "1@kafka.example.com:9093"
+      KAFKA_CONTROLLER_QUORUM_VOTERS: "1@kafka.example.localhost:9093"
       KAFKA_CONTROLLER_LISTENER_NAMES: "CONTROLLER"
 
       KAFKA_LISTENERS: "SASL_PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093"
-      KAFKA_ADVERTISED_LISTENERS: "SASL_PLAINTEXT://kafka.example.com:9092"
+      KAFKA_ADVERTISED_LISTENERS: "SASL_PLAINTEXT://kafka.example.localhost:9092"
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: "SASL_PLAINTEXT:SASL_PLAINTEXT,CONTROLLER:PLAINTEXT"
       KAFKA_INTER_BROKER_LISTENER_NAME: "SASL_PLAINTEXT"
 
@@ -90,7 +90,7 @@ services:
   # keytab and krb5.conf already mounted.
   #
   #   podman-compose exec test-client bash
-  #   kafka-topics --bootstrap-server kafka.example.com:9092 \
+  #   kafka-topics --bootstrap-server kafka.example.localhost:9092 \
   #     --command-config /etc/kafka/client.properties --list
   test-client:
     build: ./test-client
