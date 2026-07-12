@@ -51,10 +51,18 @@ services:
     volumes:
       - kafka-keytabs:/etc/kafka/secrets
       - kafka-data:/var/lib/kafka/data
-      - ./kafka/krb5.conf:/etc/krb5.conf:ro
-      - ./kafka/kafka_server_jaas.conf:/etc/kafka/kafka_server_jaas.conf:ro
-      - ./kafka/wait-for-keytab.sh:/usr/local/bin/wait-for-keytab.sh:ro
-    entrypoint: ["bash", "/usr/local/bin/wait-for-keytab.sh"]
+      - ./kafka/krb5.conf:/etc/krb5.conf:ro,Z
+      - ./kafka/kafka_server_jaas.conf:/etc/kafka/kafka_server_jaas.conf:ro,Z
+    # Wait for the KDC to publish the broker's keytab before starting Kafka.
+    # This is inlined here (rather than a mounted script) so there's no
+    # bind-mounted file whose permissions/SELinux label can go stale.
+    entrypoint: ["bash", "-c"]
+    command:
+      - |
+        echo "[kafka] Waiting for Kerberos keytab..."
+        until [ -s /etc/kafka/secrets/kafka.keytab ]; do sleep 2; done
+        echo "[kafka] Keytab found. Starting Kafka..."
+        exec /etc/confluent/docker/run
     ports:
       - "9092:9092"
     environment:
@@ -97,7 +105,7 @@ services:
       - kerberos-net
     volumes:
       - kafka-keytabs:/etc/kafka/secrets
-      - ./kafka/krb5.conf:/etc/krb5.conf:ro
-      - ./client/client.properties:/etc/kafka/client.properties:ro
+      - ./kafka/krb5.conf:/etc/krb5.conf:ro,Z
+      - ./client/client.properties:/etc/kafka/client.properties:ro,Z
     entrypoint: ["sleep", "infinity"]
     restart: unless-stopped

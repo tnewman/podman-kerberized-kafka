@@ -10,7 +10,7 @@ Compose.
 kerberized-kafka/
 ├── docker-compose.yml        # the whole stack
 ├── kdc/                      # KDC image: realm, kdc.conf, entrypoint
-├── kafka/                    # files mounted into the Kafka broker
+├── kafka/                    # config files mounted into the Kafka broker
 └── client/                   # files for connecting from outside the stack
 ```
 
@@ -26,10 +26,13 @@ kerberized-kafka/
    boot it creates the `EXAMPLE.COM` realm and generates two keytabs into a
    shared volume: one for the Kafka broker, one for a test client.
 2. `kafka` (Confluent's `cp-kafka` image) starts, but its entrypoint is
-   wrapped by `wait-for-keytab.sh`, which blocks until the KDC has written
-   `kafka.keytab` — otherwise Kafka would start before its credentials exist.
-   The broker runs KRaft mode (broker+controller combined) with a single
-   listener, `SASL_PLAINTEXT`, authenticated via GSSAPI.
+   overridden with an inline wait loop (in `docker-compose.yml`) that blocks
+   until the KDC has written `kafka.keytab`, then hands off to Kafka's normal
+   startup script — otherwise Kafka would start before its credentials
+   exist. It's inlined rather than a mounted script file so there's nothing
+   for file permissions or SELinux labeling to break. The broker runs KRaft
+   mode (broker+controller combined) with a single listener,
+   `SASL_PLAINTEXT`, authenticated via GSSAPI.
 3. `test-client` is a plain container with the client keytab and `krb5.conf`
    pre-mounted, so you can `exec` into it and run Kafka CLI tools immediately
    without installing anything on your host.
@@ -136,6 +139,18 @@ podman-compose down -v
 - **Kafka stuck on "Waiting for Kerberos keytab..."** — check `podman-compose
   logs kdc`; the realm bootstrap may have failed. Delete the `kdc-data`
   volume and retry if the database was left in a bad state.
+- **`kadmind: Can not fetch master key ... No such file or directory`** —
+  the KDC database is in a half-initialized state, usually because an
+  earlier run was interrupted mid-bootstrap. `kdc/entrypoint.sh` detects and
+  self-heals this on the next start, but if you're still stuck, force a
+  clean slate: `podman-compose down -v` (this wipes all volumes, including
+  the realm database and keytabs) then `podman-compose up -d --build`.
+- **`Permission denied` running a bind-mounted script** — on SELinux-enabled
+  hosts (Fedora, RHEL, CentOS and friends), rootless Podman blocks container
+  access to bind-mounted host files unless they're relabeled, even for
+  read-only mounts. This compose file already appends `:Z` to the relevant
+  volume mounts to handle that. If you add your own bind mounts, do the
+  same, or run `chcon -Rt container_file_t <path>` on the host directory.
 - **`GSSException: No valid credentials provided`** — usually a clock skew
   (Kerberos tickets are time-sensitive) or the client's `krb5.conf`/keytab
   principal not matching exactly. Run `klist -kt` on the keytab to confirm

@@ -10,6 +10,19 @@ CLIENT_PW="${KDC_CLIENT_PASSWORD:-clientpassword}"
 
 mkdir -p "${KEYTAB_DIR}"
 
+STASH_FILE="${KDC_DB_DIR}/.k5.${REALM}"
+
+# A previous run can be interrupted mid-bootstrap (e.g. the compose stack
+# was torn down while kdb5_util was running), leaving the principal DB file
+# present but the master-key stash missing, or vice versa. That half-state
+# makes krb5kdc/kadmind fail forever on every subsequent start ("cannot
+# fetch master key"). Detect that and wipe it so we bootstrap cleanly again.
+if [ -e "${KDC_DB_DIR}/principal" ] && [ ! -f "${STASH_FILE}" ]; then
+    echo "[kdc] Found an incomplete database (missing master key stash)."
+    echo "[kdc] Wiping ${KDC_DB_DIR} to bootstrap cleanly..."
+    find "${KDC_DB_DIR}" -mindepth 1 -delete
+fi
+
 if [ ! -f "${KDC_DB_DIR}/principal" ]; then
     echo "[kdc] No existing database found. Bootstrapping realm ${REALM}..."
 
